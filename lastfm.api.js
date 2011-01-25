@@ -1,7 +1,27 @@
 /*
- *
+ * https://github.com/fxb/javascript-last.fm-api
  * Copyright (c) 2008-2010, Felix Bruns <felixbruns@web.de>
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  *
+ *
+ * Adapted for use in Appcelerator Titanium in 2011 by Nikolai Warner <n@nikolaiwarner.com> 
  */
 
 function LastFM(options){
@@ -31,8 +51,132 @@ function LastFM(options){
 		cache = _cache;
 	};
 
+
 	/* Internal call (POST, GET). */
-	var internalCall = function(params, callbacks, requestMethod){
+	var internalCall_previous = function(params, callbacks, requestMethod){
+		/* Cross-domain POST request (doesn't return any data, always successful). */
+		if(requestMethod == 'POST'){
+			/* Create iframe element to post data. */
+			var html   = document.getElementsByTagName('html')[0];
+			var iframe = document.createElement('iframe');
+			var doc;
+
+			/* Set iframe attributes. */
+			iframe.width        = 1;
+			iframe.height       = 1;
+			iframe.style.border = 'none';
+			iframe.onload       = function(){
+				/* Remove iframe element. */
+				//html.removeChild(iframe);
+
+				/* Call user callback. */
+				if(typeof(callbacks.success) != 'undefined'){
+					callbacks.success();
+				}
+			};
+
+			/* Append iframe. */
+			html.appendChild(iframe);
+
+			/* Get iframe document. */
+			if(typeof(iframe.contentWindow) != 'undefined'){
+				doc = iframe.contentWindow.document;
+			}
+			else if(typeof(iframe.contentDocument.document) != 'undefined'){
+				doc = iframe.contentDocument.document.document;
+			}
+			else{
+				doc = iframe.contentDocument.document;
+			}
+
+			/* Open iframe document and write a form. */
+			doc.open();
+			doc.clear();
+			doc.write('<form method="post" action="' + apiUrl + '" id="form">');
+
+			/* Write POST parameters as input fields. */
+			for(var param in params){
+				doc.write('<input type="text" name="' + param + '" value="' + params[param] + '">');
+			}
+
+			/* Write automatic form submission code. */
+			doc.write('</form>');
+			doc.write('<script type="application/x-javascript">');
+			doc.write('document.getElementById("form").submit();');
+			doc.write('</script>');
+
+			/* Close iframe document. */
+			doc.close();
+		}
+		/* Cross-domain GET request (JSONP). */
+		else{
+			/* Get JSONP callback name. */
+			var jsonp = 'jsonp' + new Date().getTime();
+
+			/* Calculate cache hash. */
+			var hash = auth.getApiSignature(params);
+
+			/* Check cache. */
+			if(typeof(cache) != 'undefined' && cache.contains(hash) && !cache.isExpired(hash)){
+				if(typeof(callbacks.success) != 'undefined'){
+					callbacks.success(cache.load(hash));
+				}
+
+				return;
+			}
+
+			/* Set callback name and response format. */
+			params.callback = jsonp;
+			params.format   = 'json';
+
+      /* Build parameter string. */
+			var array = [];
+
+			for(var param in params){
+				array.push(encodeURIComponent(param) + "=" + encodeURIComponent(params[param]));
+			}
+
+      httpClient = Titanium.Network.createHTTPClient();
+      httpClient.onload = function() { self.data_success(); };
+      httpClient.onerror = function() { self.data_fail(); };
+      httpClient.open("GET",apiUrl + '?' + array.join('&').replace(/%20/g, '+'));
+      httpClient.send();
+
+
+
+
+
+
+
+			/* Create JSONP callback function. */
+			window[jsonp] = function(data){
+				/* Is a cache available?. */
+				if(typeof(cache) != 'undefined'){
+					var expiration = cache.getExpirationTime(params);
+
+					if(expiration > 0){
+						cache.store(hash, data, expiration);
+					}
+				}
+
+				/* Call user callback. */
+				if(typeof(data.error) != 'undefined'){
+					if(typeof(callbacks.error) != 'undefined'){
+						callbacks.error(data.error, data.message);
+					}
+				}
+				else if(typeof(callbacks.success) != 'undefined'){
+					callbacks.success(data);
+				}
+			};
+
+		}
+	};
+  
+  
+
+	/* Internal call (POST, GET). */
+	var internalCall_previous = function(params, callbacks, requestMethod){
 		/* Cross-domain POST request (doesn't return any data, always successful). */
 		if(requestMethod == 'POST'){
 			/* Create iframe element to post data. */
@@ -334,7 +478,7 @@ function LastFM(options){
 			/* Set new params object with authToken. */
 			params = {
 				username  : params.username,
-				authToken : md5(params.username + md5(params.password))
+				authToken : Titanium.Utils.md5HexDigest(params.username + Titanium.Utils.md5HexDigest(params.password))
 			};
 
 			signedCall('auth.getMobileSession', params, null, callbacks);
@@ -837,8 +981,7 @@ function LastFM(options){
 
 			string += apiSecret;
 
-			/* Needs lastfm.api.md5.js. */
-			return md5(string);
+			return Titanium.Utils.md5HexDigest(string);
 		}
 	};
 }
